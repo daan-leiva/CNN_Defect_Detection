@@ -1,6 +1,8 @@
 #include <iostream>
 #include <opencv2/imgproc/imgproc.hpp> // files to process images
 #include <opencv2/highgui/highgui.hpp> // files for user interface
+#include <fann_cpp.h>
+#include <fstream>
 
 using namespace std;
 using namespace cv;
@@ -25,67 +27,92 @@ int ratio = 3;
 // subsampling variables
 int subsample_ratio = 2;
 int main() {
-	// window for regular video
+	// window names
 	char* normal_window_name = "Normal video";
 	char* canny_window_name = "Edge video";
 	char* subsample_window_name = "Subsampled video";
+	// create windows
 	namedWindow(normal_window_name, WINDOW_NORMAL);
 	namedWindow(canny_window_name, WINDOW_NORMAL);
 	namedWindow(subsample_window_name, WINDOW_NORMAL);
-	// Video capture variable
+	// Open video capture
 	VideoCapture cap;
 	cap.open(video_file_path);
-	// check that video is opened succesfully
 	if (!cap.isOpened())
 		cout << "\n********\nCouldn't open video\n******" << endl;
-	// frame to hold normal video
+	// Multiple frames
 	Mat normal_frame;
-	// frame to load canny image
 	Mat canny_frame;
-	// frame to hold subsampled video
 	Mat subsample_frame;
-	// load first frame for useful purposes
+	// Load first frame to print data and create array
 	cap >> normal_frame;
-	// print key datums
 	cout << "Original size: ";
 	cout << normal_frame.cols << ", " << normal_frame.rows << endl;
 	cout << "Subsample size: ";
-	cout << normal_frame.cols/(2*subsample_ratio) << ", " << normal_frame.rows / (2 * subsample_ratio) << endl;
+	cout << normal_frame.cols / (2 * subsample_ratio) << ", " << normal_frame.rows / (2 * subsample_ratio) << endl;
+
+	//
+	// Neural network
+	//
+
 	// create array to hold data for CNN
-	int* picture_pixels = new int[normal_frame.cols / (2 * subsample_ratio)*normal_frame.rows / (2 * subsample_ratio)];
-	// play video
-	while (1) {
-		// load current grame from stream
-		cap >> normal_frame;
-		subsample_frame = normal_frame;
-		// check that there is frames left
-		if (!normal_frame.data)
-			break;
-		// create canny frame
-		Canny(normal_frame, canny_frame, lowThreshold, lowThreshold*ratio);
-		// calculate modified frame and load it		
-		pyrDown(canny_frame, subsample_frame);
-		try
-		{
+	unsigned char* pixel_data = new unsigned char[normal_frame.cols / (2 * subsample_ratio)*normal_frame.rows / (2 * subsample_ratio)];
+	// create CNN variables
+	const unsigned int num_input = normal_frame.cols / (2 * subsample_ratio)*normal_frame.rows / (2 * subsample_ratio);
+	const unsigned int num_output = 1;
+	const unsigned int num_layers = 3;
+	const unsigned int num_neurons_hidden = normal_frame.cols / (2 * subsample_ratio)*normal_frame.rows / (2 * subsample_ratio);
+	const float desired_error = (const float) 0.0001;
+	const unsigned int max_epochs = 5000000;
+	const unsigned int epochs_between_reports = 100;
+	// create Neural Network
+	try
+	{
+		struct fann *ann = fann_create_standard(num_layers, num_input, num_neurons_hidden, num_output);
+		fann_set_activation_function_hidden(ann, FANN_SIGMOID_SYMMETRIC);
+		fann_set_activation_function_output(ann, FANN_SIGMOID_SYMMETRIC);
+		// create file pointer
+		ofstream pixel_data_file;
+		pixel_data_file.open("training.data", ios::app);
+		// play video
+
+		while (1) {
+			// load current grame from stream
+			cap >> normal_frame;
+			subsample_frame = normal_frame;
+			// check that there is frames left
+			if (!normal_frame.data)
+				break;
+			// create canny frame
+			Canny(normal_frame, canny_frame, lowThreshold, lowThreshold*ratio);
+			// calculate modified frame and load it
+			pyrDown(canny_frame, subsample_frame);
 			for (int i = 0; i < subsample_ratio - 1; i++)
 				pyrDown(subsample_frame, subsample_frame);
+			// load normal frame
+			imshow(normal_window_name, normal_frame);
+			// load canny frame
+			imshow(canny_window_name, canny_frame);
+			// load subsample frame
+			imshow(subsample_window_name, subsample_frame);
+			// load matri into 1D vector
+			for (int i = 0; i < subsample_frame.cols; i++)
+				for (int j = 0; j < subsample_frame.rows; j++)
+					pixel_data[i*subsample_frame.cols + j] = subsample_frame.at<unsigned char>(i, j);
+			// write vector to text
+			// write wether text should be a defect
+			if (pixel_data_file.is_open())
+			{
+				for (int i = 0; i < subsample_frame.rows*subsample_frame.cols; i++)
+					pixel_data_file << pixel_data[i] << " ";
+			}
+			// finalizes the loading process
+			waitKey(1);
 		}
-		catch (Exception e)
-		{
-			cout << "Exception";
-		}
-		// load normal frame
-		imshow(normal_window_name, normal_frame);
-		// load canny frame
-		imshow(canny_window_name, canny_frame);
-		// load subsample frame
-		imshow(subsample_window_name, subsample_frame);
-		// load matrix into 1D vector
-		int* pixel_data = (int*)subsample_frame.data;
-		for (int i = 0; i < subsample_frame.cols*subsample_frame.rows; i++)
-			cout << pixel_data[i] << endl;
-		// finalizes the loading process
-		waitKey(1);
+	}
+	catch (Exception e)
+	{
+
 	}
 	return 0;
 }
